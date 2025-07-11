@@ -1,13 +1,19 @@
 "use client";
 import React, { useEffect, useRef, useState } from "react";
 import io from "socket.io-client";
-
+import { v4 as uuidv4 } from "uuid"; // Install with: npm i uuid
+interface Reaction {
+  emoji: string;
+  user: string;
+}
 interface Message {
+  id: string;
   name: string;
   message: string;
+  reactions?: Reaction[];
 }
 
-const socket = io("http://localhost:5000");
+const socket = io("chatappbackend-production-7b5d.up.railway.app");
 
 const ChatUI: React.FC = () => {
   const [onlineUsers, setOnlineUsers] = useState<string[]>([]);
@@ -54,11 +60,49 @@ const ChatUI: React.FC = () => {
   }, [chatLog, isTyping]);
 
   const sendMessage = () => {
-    if (!name || !message) return;
-
-    socket.emit("send_message", { name, message });
+    const newMessage: Message = {
+      id: uuidv4(), // generate unique ID
+      name,
+      message,
+      reactions: [],
+    };
+    socket.emit("send_message", newMessage);
     setMessage("");
   };
+
+  //Reactions
+  useEffect(() => {
+    socket.on(
+      "message_reaction",
+      ({
+        messageId,
+        emoji,
+        reactor,
+      }: {
+        messageId: string;
+        emoji: string;
+        reactor: string;
+      }) => {
+        setChatLog((prevChat) =>
+          prevChat.map((msg) =>
+            msg.id === messageId
+              ? {
+                  ...msg,
+                  reactions: [
+                    ...(msg.reactions || []),
+                    { emoji, user: reactor },
+                  ],
+                }
+              : msg
+          )
+        );
+      }
+    );
+
+    return () => {
+      socket.off("message_reaction");
+    };
+  }, []);
 
   const handleTyping = () => {
     socket.emit("typing", name);
@@ -116,10 +160,42 @@ const ChatUI: React.FC = () => {
                 >
                   <p className="text-sm font-semibold">{msg.name}</p>
                   <p>{msg.message}</p>
+                  <div className="flex gap-1 mt-1">
+                    {["👍", "😂", "❤️"].map((emoji) => (
+                      <button
+                        key={emoji}
+                        className="text-xl hover:scale-110 transition"
+                        onClick={() =>
+                          socket.emit("react_to_message", {
+                            messageId: msg.id,
+                            emoji,
+                            reactor: name,
+                          })
+                        }
+                      >
+                        {emoji}
+                      </button>
+                    ))}
+                  </div>
+
+                  {/* Show Reactions */}
+                  {msg.reactions && msg.reactions.length > 0 && (
+                    <div className="mt-1 flex gap-1 text-sm">
+                      {msg.reactions.map((r, idx) => (
+                        <span
+                          key={idx}
+                          className="bg-gray-200 px-2 py-1 rounded-full"
+                        >
+                          {r.emoji} {r.user === name ? "(You)" : `(${r.user})`}
+                        </span>
+                      ))}
+                    </div>
+                  )}
                 </div>
               </div>
             );
           })}
+
           {isTyping && isTyping !== name && (
             <p className="text-sm text-gray-500 italic animate-pulse">
               ✍️ {isTyping} is typing...
